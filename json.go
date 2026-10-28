@@ -27,7 +27,15 @@ type frame struct {
 // other string goes through the rules. Keys themselves are left alone. Input that is not one
 // valid JSON value is an error and nothing is returned: the caller decides what to do with text
 // it cannot parse (agent-redact's CLI falls back to String).
-func (r *Redactor) JSON(in []byte) ([]byte, Hits, error) {
+//
+// A string that is itself one JSON object or array (a coding agent's tool call is stored that way:
+// "arguments": "{\"cmd\": ...}") is read as JSON again and redacted the same way, to a depth of
+// maxNesting. It is written back, compact and re-escaped, only when something in it was redacted.
+func (r *Redactor) JSON(in []byte) ([]byte, Hits, error) { return r.walk(in, 0) }
+
+// walk is JSON for a document at nesting depth depth: 0 for the one the caller passed, and one more for
+// each string it sits in.
+func (r *Redactor) walk(in []byte, depth int) ([]byte, Hits, error) {
 	dec := json.NewDecoder(bytes.NewReader(in))
 	dec.UseNumber()
 	var out bytes.Buffer
@@ -90,7 +98,7 @@ func (r *Redactor) JSON(in []byte) ([]byte, Hits, error) {
 				writeString(&out, t)
 				break
 			}
-			s, h := r.value(key, t)
+			s, h := r.value(key, t, depth)
 			hits = hits.Merge(h)
 			writeString(&out, s)
 			done = len(stack) == 0

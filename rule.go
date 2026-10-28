@@ -30,12 +30,28 @@ type Rule struct {
 	// one of them. Leave empty for rules that cannot be pre-checked.
 	Hints []string
 	// Guard is the capture group that holds the secret itself (0 means the whole match). A match
-	// whose secret already is a placeholder is left alone, which keeps Redact idempotent.
+	// whose secret already is a placeholder is left alone, which keeps Redact idempotent; so is one
+	// whose secret is nothing but backslashes (see leaveAlone).
 	Guard int
 
 	// fast, set on built-in rules only, finds the same matches quicker (see fast.go). Re stays the
 	// definition of the rule and is what the differential test compares the fast path with.
 	fast *fastPath
+}
+
+// leaveAlone reports whether what a rule took for a secret is not one: it already is a placeholder, or it is a
+// run of backslashes, which is what a bare value picks up in front of a quote that text escaped more than once
+// (\\\" is the escape of a quote, not a value).
+func leaveAlone(secret string) bool {
+	if strings.HasPrefix(secret, placeholderPrefix) {
+		return true
+	}
+	for i := 0; i < len(secret); i++ {
+		if secret[i] != '\\' {
+			return false
+		}
+	}
+	return len(secret) > 0
 }
 
 func (r Rule) mayMatch(s string) bool {
@@ -73,7 +89,7 @@ func (r Rule) applyRegex(s string) (string, int) {
 	last, n := 0, 0
 	for _, loc := range locs {
 		g := r.Guard * 2
-		if g+1 < len(loc) && loc[g] >= 0 && strings.HasPrefix(s[loc[g]:loc[g+1]], placeholderPrefix) {
+		if g+1 < len(loc) && loc[g] >= 0 && leaveAlone(s[loc[g]:loc[g+1]]) {
 			continue
 		}
 		b.WriteString(s[last:loc[0]])

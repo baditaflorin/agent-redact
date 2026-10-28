@@ -1,6 +1,7 @@
 package redact
 
 import (
+	"encoding/json"
 	"regexp"
 	"sort"
 	"strings"
@@ -121,11 +122,53 @@ func isSecretKey(key string) bool {
 	return keyName.MatchString(keyStrip.Replace(strings.ToLower(key)))
 }
 
+// maxNesting is how many levels of "a JSON document held in a string" JSON follows. Real records go three
+// deep at most; the bound keeps the work on a hostile document to a small multiple of its size, because
+// every level re-reads the string it opened.
+const maxNesting = 4
+
 // value redacts one JSON string value, given the key it sits under ("" for an array element or a
-// top-level string).
-func (r *Redactor) value(key, s string) (string, Hits) {
+// top-level string) and the nesting depth of the document it is in.
+func (r *Redactor) value(key, s string, depth int) (string, Hits) {
 	if key != "" && s != "" && !strings.HasPrefix(s, placeholderPrefix) && isSecretKey(key) {
 		return placeholder(KeyNameRuleName), Hits{KeyNameRuleName: 1}
 	}
-	return r.String(s)
+	var hits Hits
+	// the document goes first: read as JSON its quotes are real, and a rule that spans the whole text
+	// (a private key cut off before its end line) cannot cut the document's own structure
+	if depth < maxNesting && mayBeDocument(s) {
+		if inner, h, ok := r.document(s, depth+1); ok {
+			s, hits = inner, h
+		}
+	}
+	out, h := r.String(s)
+	return out, hits.Merge(h)
+}
+
+// mayBeDocument is the cheap test that keeps ordinary strings out of the JSON parser: after JSON white
+// space the string opens an object or an array, and it holds a quote (a document with no string in it has
+// nothing to redact).
+func mayBeDocument(s string) bool {
+	i := 0
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
+		i++
+	}
+	if i == len(s) || (s[i] != '{' && s[i] != '[') {
+		return false
+	}
+	return strings.IndexByte(s[i:], '"') >= 0
+}
+
+// document redacts s as a JSON document at the given depth. ok is true only when s is exactly one valid
+// JSON value and something in it was redacted; inner is then the document re-written compact.
+func (r *Redactor) document(s string, depth int) (inner string, hits Hits, ok bool) {
+	b := []byte(s)
+	if !json.Valid(b) {
+		return "", nil, false
+	}
+	out, hits, err := r.walk(b, depth)
+	if err != nil || hits.Total() == 0 {
+		return "", nil, false
+	}
+	return string(out), hits, true
 }

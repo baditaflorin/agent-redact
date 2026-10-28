@@ -72,7 +72,9 @@ func TestJSONStringHoldingJSONText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(out), "hunter2hunter2") || hits["env-secret"] != 1 {
+	// the document is read as JSON, so the key decides: one redaction, by the key-name rule (before v0.1.2 the text rules
+	// found it as env-secret)
+	if strings.Contains(string(out), "hunter2hunter2") || hits[redact.KeyNameRuleName] != 1 || hits.Total() != 1 {
 		t.Fatalf("%s %v", out, hits)
 	}
 }

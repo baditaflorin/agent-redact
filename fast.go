@@ -162,7 +162,7 @@ func (r Rule) applyFast(s string, sc *scratch) (out string, n int, handled bool)
 		}
 		pos = loc[1] // the match is consumed even when the guard leaves it alone
 		g := r.Guard * 2
-		if g+1 < len(loc) && loc[g] >= 0 && strings.HasPrefix(s[loc[g]:loc[g+1]], placeholderPrefix) {
+		if g+1 < len(loc) && loc[g] >= 0 && leaveAlone(s[loc[g]:loc[g+1]]) {
 			return true
 		}
 		b.WriteString(s[last:loc[0]])

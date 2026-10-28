@@ -98,6 +98,18 @@ var trickyCases = []string{
 	"export TOKEN=abcdefgh --password hunter2hunter2 https://u:p@h Authorization: Bearer abcdefgh sk-abcdefghijklmnopqrstuvwx",
 	"TOKEN=abcdefgh\nPASSWORD='x y z w'\nSECRET=\"p q r s\"\n",
 	"token=\"a b c d\" secret='e f g h' password=ijklmnop",
+	// escaped quotes: \" as a JSON string or a shell string shows a quote, \\\" one level deeper
+	`NAME_TOKEN=\"a value with spaces\"`, `{\"api_key\": \"hunter2hunter2\"}`, `{\\\"api_key\\\": \\\"hunter2hunter2\\\"}`,
+	`{\"user\":\"ann\",\"access_token\":\"abcdefghijklmnop\"}`, `DB_PASSWORD=\'my long secret phrase\'`, `{\'password\': \'hunter2hunter2\'}`,
+	`APP_TOKEN=\"ab\"`, `APP_TOKEN=\"abcd\"`, `APP_TOKEN=\"abc\"`, `APP_TOKEN=\"abc\\"`, `APP_TOKEN="abc\"`, `APP_TOKEN=\"abc"`, `APP_TOKEN="abcd\\\"`,
+	`token=\"` + strings.Repeat("a", 300) + `\"`, `token=\"` + strings.Repeat("a", 301) + `\"`, `token="` + strings.Repeat("a", 299) + `\\"`,
+	`token=\"[REDACTED:env-secret]\"`, `token=\'[REDACTED:env-secret]\'`, `{\"token\": \"[REDACTED:env-secret]\"}`,
+	`token=\\\\\\\\\"abcdefgh\\\\\\\\\"`, `token=\\\\\\\\\\\\\\\\\"abcd\"`, `token=\\`, `token=\"`, `token=\"\n`, "token=\\\"ab\ncd\\\"",
+	"TOKEN\\\"=\\\"abcdefgh\\\"", `"TOKEN"=\"abcdefgh\"`, `\"TOKEN\"\t:\t\"abcdefgh\"`, `\"TOKEN\" : abcdefghi`, `\"token\":\"x\",\"secret\":\"abcdefg\"`,
+	`\"Authorization\": \"Bearer abcdefgh1\"`, `\"authorization\":\"basic abcdefgh1\"`, `authorization=\"token abcdefgh1\"`, `authorization\\\"\\\":\\\" bearer abcdefgh1`,
+	`\\\"Authorization\\\": \\\"Bearer abcdefgh1\\\"`, `-H \"Authorization: Bearer abcdefghijklmnop\" -H \"X: y\"`,
+	`mysql --password \"hunter2flag99\" -h db`, `mysql --password \\\"hunter2flag99\\\" -h db`, ` --token \'abcdefgh\'`, ` --token \\\\abcdefgh`, ` --token \\"abcdefgh`, ` --password=\"hunter2flag99\"`,
+	"TO\xe2\x84\xaaEN=\\\"abcdefgh\\\"", "\xc5\xbfecret=\\\"abcdefgh\\\"", "k\xe2\x84\xaa --password \\\"abcdefgh\\\"",
 }
 
 func TestFastEqualsReferenceOnTrickyCases(t *testing.T) {
@@ -115,13 +127,17 @@ func generated(r *rand.Rand) string {
 	names := []string{"TOKEN", "token", "Api_Key", "api-key", "apikey", "my_password", "PASSWD", "secret", "SECRET_KEY", "secretkey",
 		"credentials", "credential", "x", "tokens", "authorization", "Authorization", "access_key", "AccessKey", "private_key",
 		"auth_key", "db_token", "\xc3\xa9token", "\xc8\x99secret", "t0ken", "tokenizer", "my-token", "\xc5\xbfecret", "TO\xe2\x84\xaaEN"}
-	seps := []string{"=", ": ", " = ", "\": \"", "':'", "=\"", "='", " :\n", "\t=\t", "\":", "'=", "= ", ":", " "}
+	seps := []string{"=", ": ", " = ", "\": \"", "':'", "=\"", "='", " :\n", "\t=\t", "\":", "'=", "= ", ":", " ",
+		`=\"`, `\": \"`, `\":\"`, `=\'`, `\'=\'`, `\\\": \\\"`, `=\\\"`, `\": `, `\"=`, `=\\\\\\"`, `\" :\n\"`}
 	values := []string{"abcdefgh", "hunter2hunter2", "abc def ghi", "[REDACTED:env-secret]", "12345", "ab", strings.Repeat("a", 301),
-		"\"abcd\"", "'abcd'", "\"ab\"", "a,b;c)d]e", "\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9", "Bearer abcdefgh", "basic zzzzzzzz", "token abcdefghi"}
-	flags := []string{" --password ", " --token ", " -secret ", " --db-api-key ", "--token ", " --auth-key ", " --token-x ", "\t--passwd "}
+		"\"abcd\"", "'abcd'", "\"ab\"", "a,b;c)d]e", "\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9", "Bearer abcdefgh", "basic zzzzzzzz", "token abcdefghi",
+		`\"abcd\"`, `\"ab cd ef\"`, `\\\"abcd\\\"`, `\'abcd\'`, `\"ab\"`, `\"Bearer abcdefgh\"`, `\"abcd"`, `"abcd\"`, `\"abc def\\"`, strings.Repeat("a", 300) + `\"`, `\"` + strings.Repeat("b", 299) + `\"`}
+	flags := []string{" --password ", " --token ", " -secret ", " --db-api-key ", "--token ", " --auth-key ", " --token-x ", "\t--passwd ",
+		` --password \"`, ` --token \'`, ` --secret \\\"`}
 	urls := []string{"https://u:p@h", "http://example.com/a", "ftp://a:b@c/x", "x://u@h", "abcdefghijklmnopqrstuvwxyz://u:p@h", "a.b-c+d://u:p@h", "http://u:@h", "'http://u:p@h'"}
 	keys := []string{"sk-abcdefghijklmnopqrstuvwx", "task-abcdefghijklmnopqrstuvwxyz", "sk-proj-abcdefghijklmnopqrstuvwx", "sk-ant-abcdefghijklmnopqrstuvwx", "sk-x"}
-	words := []string{"the", "a", "function", "returns", "error", "\n", " ", "  ", "\t", "\"", "'", "(", ")", "{", "}", "[", "]", ",", ";"}
+	words := []string{"the", "a", "function", "returns", "error", "\n", " ", "  ", "\t", "\"", "'", "(", ")", "{", "}", "[", "]", ",", ";",
+		`\`, `\"`, `\\"`, `\'`, `\n`}
 	var b strings.Builder
 	for i, n := 0, 1+r.Intn(10); i < n; i++ {
 		switch r.Intn(7) {

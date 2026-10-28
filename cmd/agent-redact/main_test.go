@@ -131,3 +131,28 @@ func TestListAndBadMode(t *testing.T) {
 		t.Fatalf("%d %q", code, errOut)
 	}
 }
+
+// a tool call stored as a document inside a string: both JSON modes read it, and text mode finds its escaped quotes
+func TestDocumentsHeldInStringsAndEscapedQuotes(t *testing.T) {
+	f := fake(t, "env-secret") // DB_PASSWORD=...: unquoted, so the quoted one is picked by its text
+	for _, c := range canary.Fakes() {
+		if strings.Contains(c.Text, "STRIPE_WEBHOOK_SECRET") {
+			f = c
+		}
+	}
+	inner := `{"cmd":"` + strings.NewReplacer(`"`, `\"`).Replace(f.Text) + `"}`
+	record := `{"arguments":"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(inner) + `"}`
+	for _, mode := range []string{"json", "ndjson"} {
+		code, out, _ := runCLI(t, record+"\n", "-mode", mode)
+		if code != 0 || strings.Contains(out, f.Secret) || !strings.Contains(out, "[REDACTED:env-secret]") {
+			t.Errorf("-mode %s: %d %q", mode, code, out)
+		}
+	}
+	code, out, _ := runCLI(t, inner, "-mode", "text")
+	if code != 0 || strings.Contains(out, f.Secret) || !strings.Contains(out, "[REDACTED:env-secret]") {
+		t.Errorf("-mode text: %d %q", code, out)
+	}
+	if code, _, _ := runCLI(t, record, "-mode", "json", "-check"); code != exitFound {
+		t.Errorf("-check on a nested record exits %d, want %d", code, exitFound)
+	}
+}
