@@ -14,7 +14,7 @@ import (
 	redact "github.com/baditaflorin/agent-redact"
 )
 
-const version = "0.1.0"
+const version = "0.1.1"
 
 const (
 	exitOK    = 0

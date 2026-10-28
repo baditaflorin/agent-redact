@@ -79,21 +79,46 @@ func (r *Redactor) RuleNames() []string {
 	return append(names, KeyNameRuleName)
 }
 
+// maxPasses bounds how often String repeats itself on its own output.
+const maxPasses = 5
+
 // String redacts s. It returns s itself, unchanged, when nothing matched.
+//
+// It repeats until a pass finds nothing more, so that redacting its own output changes nothing: a first pass
+// can shorten the text (a long secret inside a quoted value becomes a short placeholder) and so let a
+// length-limited rule match the value around it on the next. Text with no secret costs one pass.
 func (r *Redactor) String(s string) (string, Hits) {
 	var hits Hits
+	for pass := 0; pass < maxPasses; pass++ {
+		out, h := r.pass(s)
+		if len(h) == 0 {
+			break
+		}
+		s = out
+		hits = hits.Merge(h)
+	}
+	return s, hits
+}
+
+// pass applies every rule once, in order.
+func (r *Redactor) pass(s string) (string, Hits) {
+	var hits Hits
+	var sc scratch
 	for _, ru := range r.rules {
 		var n int
-		s, n = ru.apply(s)
+		s, n = ru.apply(s, &sc)
+		if n > 0 {
+			sc = scratch{} // the text changed: what was worked out about it no longer holds
+		}
 		hits = hits.add(ru.Name, n)
 	}
 	return s, hits
 }
 
+var keyStrip = strings.NewReplacer("_", "", "-", "", ".", "", " ", "")
+
 func isSecretKey(key string) bool {
-	k := strings.ToLower(key)
-	k = strings.NewReplacer("_", "", "-", "", ".", "", " ", "").Replace(k)
-	return keyName.MatchString(k)
+	return keyName.MatchString(keyStrip.Replace(strings.ToLower(key)))
 }
 
 // value redacts one JSON string value, given the key it sits under ("" for an array element or a

@@ -6,7 +6,9 @@ land in a searchable archive.
 
 - Go library and a small command line filter. Standard library only, no network, no state.
 - Prefers a false positive to a leak. Text it has no rule for passes through unchanged.
-- Idempotent: redacting redacted text changes nothing.
+- Idempotent: redacting redacted text changes nothing. `String` repeats until a pass finds nothing more (at most 5),
+  because a first pass can shorten the text and let a length-limited rule match the value around it on the next.
+- Fast: about 30 MB/s per core on text shaped like agent output (1 MB/s before v0.1.1); see Speed.
 - JSON-aware: strings are redacted in place, keys stay in their original order, numbers stay as written,
   and a value under a key such as `password`, `access_token` or `Authorization` is replaced whole.
 
@@ -69,6 +71,32 @@ Every match becomes `[REDACTED:<rule>]`.
 
 A name has to END with the sensitive word, so `API_KEY` and `db_password` match while `input_tokens`,
 `TOKEN_LIMIT` and `tokenizer` do not.
+
+## Speed
+
+On a generated corpus that imitates agent text (strings with a median of 265 bytes, a p90 of 2 KB and a p99 of
+11 KB, with trigger words such as "token", "secret" and URLs at the density a real session sample showed),
+measured in a container capped at 3 CPUs:
+
+| | before v0.1.1 | v0.1.1 |
+|---|---|---|
+| `String` | 1.0 MB/s | 30 MB/s |
+| `JSON` (one event record per call) | 0.9 MB/s | 17 MB/s |
+| `env-secret` rule alone | 3 MB/s | 100 MB/s |
+
+The slow rules are the ones whose patterns start with a character class or a case-insensitive word, which Go's
+regular expression engine handles slowly. They now look for their trigger words with a plain literal search and
+run the same regular expression, anchored, only at the offsets where a match could start. A text holding the
+two characters that Go's case-insensitive matching folds onto ASCII letters (U+017F and U+212A) is handed back
+to the plain regular expression, so the answer is the same either way.
+
+The speed-up is not allowed to change what is found: the tests compare the fast path with the original
+whole-text rules (kept in the code as the reference) on every canary, on a generated corpus, on a long list of
+awkward cases and on 60,000 generated texts, and a fuzz target does the same
+(`go test -fuzz FuzzFastEqualsReference`). The fuzzer found one real difference while this was built (a Kelvin
+sign in a URL scheme); it is fixed and kept as a regression case.
+
+Benchmarks: `go test -run XXX -bench 'BenchmarkRule|BenchmarkString|BenchmarkJSON' .` prints the per-rule table.
 
 ## Canary
 

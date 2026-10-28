@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
 var (
@@ -117,9 +119,26 @@ func (r *Redactor) JSON(in []byte) ([]byte, Hits, error) {
 
 // writeString writes s as a JSON string without HTML escaping, so that "<" and "&" stay readable.
 func writeString(buf *bytes.Buffer, s string) {
+	if plainJSONString(s) {
+		buf.WriteByte('"')
+		buf.WriteString(s)
+		buf.WriteByte('"')
+		return
+	}
 	var tmp bytes.Buffer
 	enc := json.NewEncoder(&tmp)
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(s)
 	buf.Write(bytes.TrimRight(tmp.Bytes(), "\n"))
+}
+
+// plainJSONString reports whether the encoder would write s between quotes exactly as it is: no quote,
+// backslash or control character, valid UTF-8, and neither U+2028 nor U+2029 (which it escapes).
+func plainJSONString(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c == '"' || c == '\\' {
+			return false
+		}
+	}
+	return utf8.ValidString(s) && !strings.Contains(s, "\xe2\x80\xa8") && !strings.Contains(s, "\xe2\x80\xa9")
 }

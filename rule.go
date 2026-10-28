@@ -32,6 +32,10 @@ type Rule struct {
 	// Guard is the capture group that holds the secret itself (0 means the whole match). A match
 	// whose secret already is a placeholder is left alone, which keeps Redact idempotent.
 	Guard int
+
+	// fast, set on built-in rules only, finds the same matches quicker (see fast.go). Re stays the
+	// definition of the rule and is what the differential test compares the fast path with.
+	fast *fastPath
 }
 
 func (r Rule) mayMatch(s string) bool {
@@ -47,10 +51,20 @@ func (r Rule) mayMatch(s string) bool {
 }
 
 // apply replaces every match in s and returns the new text and how many matches it replaced.
-func (r Rule) apply(s string) (string, int) {
+func (r Rule) apply(s string, sc *scratch) (string, int) {
 	if !r.mayMatch(s) {
 		return s, 0
 	}
+	if r.fast != nil {
+		if out, n, ok := r.applyFast(s, sc); ok {
+			return out, n
+		}
+	}
+	return r.applyRegex(s)
+}
+
+// applyRegex is apply done the plain way: the rule's regular expression over the whole text.
+func (r Rule) applyRegex(s string) (string, int) {
 	locs := r.Re.FindAllStringSubmatchIndex(s, -1)
 	if len(locs) == 0 {
 		return s, 0
