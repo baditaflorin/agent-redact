@@ -68,9 +68,10 @@ Every match becomes `[REDACTED:<rule>]`.
 | `jwt` | three-part JSON web tokens |
 | `auth-header` | the value of `Authorization: Bearer|Basic|Token ...` |
 | `url-credentials` | the password in `scheme://user:password@host` |
-| `env-secret` | the value of `NAME=value` or `"name": "value"` when NAME ends in token, secret, password, api key, access key, private key, auth key or credentials (quoted values of 4 to 300 characters may contain spaces; quotes may be escaped) |
+| `cookie-header` | the whole value of a `Cookie:` or `Set-Cookie:` header (to the end of its line, or the quote that closes it), and the quoted value of a pair such as `"Cookie": "a=b"` |
+| `env-secret` | the value of `NAME=value` or `"name": "value"` when NAME ends in token, secret, password, api key, access key, private key, auth key or credentials (a quoted value of 4 characters or more may contain spaces; quotes may be escaped) |
 | `flag-secret` | the value after `--password `, `--token ` and similar flags |
-| `key-name` | JSON only: a string value under a key that names a secret |
+| `key-name` | JSON only: a string value under a key that names a secret: password, passwd, passphrase, secret, secret key, token, api key, access key, private key, auth key, signing key, encryption key, master key, authorization, credential(s), cookie |
 
 A name has to END with the sensitive word, so `API_KEY` and `db_password` match while `input_tokens`,
 `TOKEN_LIMIT` and `tokenizer` do not.
@@ -79,9 +80,20 @@ A name has to END with the sensitive word, so `API_KEY` and `db_password` match 
 and, one level deeper, as `\\\"`. The `env-secret`, `auth-header` and `flag-secret` rules accept any number of
 backslashes in front of a quote, so `echo "STRIPE_SECRET=\"my long phrase\"" >> .env`, `{\"api_key\": \"v\"}` and
 `\"Authorization\": \"Bearer ...\"` are found like their plain forms. The backslashes that belong to a closing quote
-stay in the text, so a JSON document kept as text is still valid JSON afterwards. Two exceptions: the value of an
-unquoted assignment (`NAME=value`) or of a flag takes the backslash of an escaped closing quote with it. A run of
-backslashes is never taken for a value.
+stay in the text (the value of an unquoted assignment or flag stops before them too), so a JSON document kept as text
+is still valid JSON afterwards. A run of backslashes is never taken for a value.
+
+**Cookies.** A `Cookie:` or `Set-Cookie:` header is replaced from the colon to the end of its line, whatever the
+attributes: `Set-Cookie: sid=...; Path=/; HttpOnly` becomes `Set-Cookie: [REDACTED:cookie-header]`. A header held in
+single quotes (`-H 'Cookie: a=b'`) ends at the closing quote; one held in double quotes or in a JSON string ends at that
+quote. The value has to hold `name=value`, so prose such as `Cookie: none` is left alone, and it is not capped: real
+cookie headers run to a thousand characters. Not covered: `COOKIE=value` assignments, curl's `-b` and `--cookie`.
+
+**Names and lengths.** The `key-name` words are the ones the text rules know plus a few that only make sense as JSON
+keys. Words that real records use for something harmless are left out on purpose: `session_id`, `session_key` (an
+identifier), `pwd` (the working directory) and `pass`. A quoted `env-secret` value has to be 4 characters or more and has
+no upper limit (up to v0.1.2 it stopped at 300). A quoted value whose closing quote is missing on the line (a tool
+output cut off in the middle of a value) is not found: no rule reads an unterminated quote.
 
 ## Documents held in strings
 
@@ -97,7 +109,7 @@ The text rules run over the string afterwards as well.
 **Not covered:** a document nested deeper than four levels, a document cut off before its end (not valid JSON), and a
 string that holds a JSON string literal (a document encoded twice) are redacted by the text rules only. Those read
 escaped quotes at any depth, so a quoted secret is still found, but the key-name rule does not apply to them: a value
-under `cookie`, or a value of 1 to 3 characters under `password`, is not found there. `String` (and `-mode text`) never
+under `signing_key`, or a value of 1 to 3 characters under `password`, is not found there. `String` (and `-mode text`) never
 parses: text that is a JSON document is redacted by the text rules, which read its escaped quotes.
 
 ## Speed
@@ -131,6 +143,11 @@ the `env-secret` rules unchanged. `JSON` on records where every string is a docu
 runs at 0.58 of v0.1.1's speed (about 9 MB/s on the corpus), because each such record is read twice; v0.1.1 was faster
 there only because it missed the secrets. In real Codex session files about 11% of the string bytes are documents.
 
+v0.1.3 (the cookie rule, no 300-character limit on quoted values, escapes kept out of unquoted values) did not give
+speed back either. Side by side with v0.1.2 in the same way: `String` 0.97, `JSON` 1.00, `JSON` on records where every
+string is a document inside a string 1.06, and 0.98 on text where a quarter of the strings hold a long quoted value, a
+cookie header or an unquoted value ending in an escaped quote (v0.1.3 redacts 961 strings of that corpus, v0.1.2 412).
+
 `String` does not parse text that is a JSON document: reading it as JSON first would run at about 0.4 of the speed on
 text where every string is a document (10.5 against 27 MB/s), and the escaped-quote rules already find the secrets
 that parse would find, so it would only add the key-name rule, which belongs to `JSON`. On text that is not a document
@@ -141,7 +158,7 @@ per-rule table, the record benchmarks and the text-mode comparison.
 
 ## Canary
 
-`canary.Fakes()` returns one fake secret per rule, assembled at run time so this source never holds a string a
+`canary.Fakes()` returns fake secrets for every rule (more than one where a rule has several forms), assembled at run time so this source never holds a string a
 scanner would flag. Write them into a test session, let your pipeline store it, then search the stored data for
 each `Secret`. Any hit means a rule or a stage let a key through.
 

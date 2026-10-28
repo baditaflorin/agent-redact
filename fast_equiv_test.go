@@ -38,8 +38,8 @@ func TestFastPathIsActive(t *testing.T) {
 			n++
 		}
 	}
-	if n != 7 { // openai, auth-header, url-credentials, three env-secret, flag-secret
-		t.Fatalf("%d rules have a fast path, want 7", n)
+	if n != 11 { // openai, auth-header, url-credentials, four cookie-header, three env-secret, flag-secret
+		t.Fatalf("%d rules have a fast path, want 11", n)
 	}
 	if got := len(referenceRules()); got != len(DefaultRules()) {
 		t.Fatal("reference rules differ in number")
@@ -110,6 +110,18 @@ var trickyCases = []string{
 	`\\\"Authorization\\\": \\\"Bearer abcdefgh1\\\"`, `-H \"Authorization: Bearer abcdefghijklmnop\" -H \"X: y\"`,
 	`mysql --password \"hunter2flag99\" -h db`, `mysql --password \\\"hunter2flag99\\\" -h db`, ` --token \'abcdefgh\'`, ` --token \\\\abcdefgh`, ` --token \\"abcdefgh`, ` --password=\"hunter2flag99\"`,
 	"TO\xe2\x84\xaaEN=\\\"abcdefgh\\\"", "\xc5\xbfecret=\\\"abcdefgh\\\"", "k\xe2\x84\xaa --password \\\"abcdefgh\\\"",
+	// cookie headers and pairs, plain and escaped
+	"Cookie: a=b", "Cookie: a=b\nHost: x", "Set-Cookie: sid=abc; Path=/", "cookie:a=b", "COOKIE: a=b; c=d", `-H 'Cookie: a=b' x`, `-H "Cookie: a=b" x`,
+	`-H \"Cookie: a=b\" x`, `-H \\\"Cookie: a=b\\\" x`, `-H \'Cookie: a=b\' x`, `{"Cookie": "a=b; c=d"}`, `{'Cookie': 'a=b'}`, `{\"cookie\":\"a=b\"}`,
+	`document.cookie = "a=b"`, `Cookie: a="x y"; b=c`, `Cookie: a="x`, `Cookie: a=x'y`, "Cookie: none", "Cookie: =", "Cookie: a=", "Cookie: =a", "Cookie:",
+	"Cookie: \n a=b", "cookies: a=b", "session_cookie: a=b", "x-cookie: a=b", "Cookie: " + strings.Repeat("a=b; ", 300), `'Cookie: a=b`,
+	`'Cookie: a=b' 'Cookie: c=d'`, `\\\'Cookie: abc\\\'`, `'Cookie: `, `"Cookie: a=b\"`, `Cookie: a=b\\"`, `Cookie: a=b\"`, "Cookie: a=b\r\nCookie: c=d",
+	`{"h":"Cookie: a=b"}`, `{\"h\":\"Cookie: a=b\"}`, `{\"h\":\"Cookie: a=b\\\\"}`, `cookie: "a=bcd"`, `cookie="a=bcd"`, `cookie: 'a=bcd'`, `Cookie: [REDACTED:cookie-header]`,
+	`'Cookie: [REDACTED:cookie-header]'`, `{"cookie": "[REDACTED:cookie-header]"}`, "Cookie: a=b; Cookie: c=d", `'Cookie: a=b'Cookie: c=d'`,
+	"Coo\xe2\x84\xaaie: a=b", `{"Coo\xe2\x84\xaaie": "a=bcd"}`, "'Coo\xe2\x84\xaaie: a=bcd'",
+	// trailing backslashes of an escaped closing quote
+	`echo \"API_KEY=abcdefghijk\"`, `echo \'API_KEY=abcdefghijk\'`, `T_TOKEN=abcde\" x`, `PASSWORD=abcdefg\ more`, `PASSWORD=abcdefg\\" more`, `PASSWORD=abcdefg\\`,
+	`PASSWORD=\\\\\\"`, `PASSWORD=abcdef\\\\\\\\"x`, `--password abcdefgh\" x`, `--password \"abcdefgh\" x`, `--password abcdefg\\\\\\\\ x`,
 }
 
 func TestFastEqualsReferenceOnTrickyCases(t *testing.T) {
@@ -126,11 +138,13 @@ func TestFastEqualsReferenceOnTrickyCases(t *testing.T) {
 func generated(r *rand.Rand) string {
 	names := []string{"TOKEN", "token", "Api_Key", "api-key", "apikey", "my_password", "PASSWD", "secret", "SECRET_KEY", "secretkey",
 		"credentials", "credential", "x", "tokens", "authorization", "Authorization", "access_key", "AccessKey", "private_key",
-		"auth_key", "db_token", "\xc3\xa9token", "\xc8\x99secret", "t0ken", "tokenizer", "my-token", "\xc5\xbfecret", "TO\xe2\x84\xaaEN"}
+		"auth_key", "db_token", "\xc3\xa9token", "\xc8\x99secret", "t0ken", "tokenizer", "my-token", "\xc5\xbfecret", "TO\xe2\x84\xaaEN",
+		"cookie", "Cookie", "Set-Cookie", "session_cookie", "COOKIE", "cookies", "x-cookie", "Coo\xe2\x84\xaaie"}
 	seps := []string{"=", ": ", " = ", "\": \"", "':'", "=\"", "='", " :\n", "\t=\t", "\":", "'=", "= ", ":", " ",
 		`=\"`, `\": \"`, `\":\"`, `=\'`, `\'=\'`, `\\\": \\\"`, `=\\\"`, `\": `, `\"=`, `=\\\\\\"`, `\" :\n\"`}
 	values := []string{"abcdefgh", "hunter2hunter2", "abc def ghi", "[REDACTED:env-secret]", "12345", "ab", strings.Repeat("a", 301),
 		"\"abcd\"", "'abcd'", "\"ab\"", "a,b;c)d]e", "\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9", "Bearer abcdefgh", "basic zzzzzzzz", "token abcdefghi",
+		"a=b; c=d", "sid=abc123; Path=/; HttpOnly", `a="b c"; d=e`, "a=x'y", "a=", "=a", `a=b\r\nHost: x`, strings.Repeat("a=b; ", 80),
 		`\"abcd\"`, `\"ab cd ef\"`, `\\\"abcd\\\"`, `\'abcd\'`, `\"ab\"`, `\"Bearer abcdefgh\"`, `\"abcd"`, `"abcd\"`, `\"abc def\\"`, strings.Repeat("a", 300) + `\"`, `\"` + strings.Repeat("b", 299) + `\"`}
 	flags := []string{" --password ", " --token ", " -secret ", " --db-api-key ", "--token ", " --auth-key ", " --token-x ", "\t--passwd ",
 		` --password \"`, ` --token \'`, ` --secret \\\"`}
@@ -138,9 +152,17 @@ func generated(r *rand.Rand) string {
 	keys := []string{"sk-abcdefghijklmnopqrstuvwx", "task-abcdefghijklmnopqrstuvwxyz", "sk-proj-abcdefghijklmnopqrstuvwx", "sk-ant-abcdefghijklmnopqrstuvwx", "sk-x"}
 	words := []string{"the", "a", "function", "returns", "error", "\n", " ", "  ", "\t", "\"", "'", "(", ")", "{", "}", "[", "]", ",", ";",
 		`\`, `\"`, `\\"`, `\'`, `\n`}
+	hdrOpen := []string{"", "-H '", `-H "`, `\"`, `\'`, "\n", "HTTP/1.1 200 OK\r\n", `\\\"`, "'", `"`}
+	hdrClose := []string{"", "'", `"`, `\"`, `\'`, "\n", " https://x", `\\\"`, "\r\n"}
+	hdrNames := []string{"Cookie: ", "Set-Cookie: ", "cookie:", "COOKIE : ", "session_cookie: ", "cookies: ", "x-cookie:\t"}
 	var b strings.Builder
 	for i, n := 0, 1+r.Intn(10); i < n; i++ {
-		switch r.Intn(7) {
+		switch r.Intn(8) {
+		case 7:
+			b.WriteString(hdrOpen[r.Intn(len(hdrOpen))])
+			b.WriteString(hdrNames[r.Intn(len(hdrNames))])
+			b.WriteString(values[r.Intn(len(values))])
+			b.WriteString(hdrClose[r.Intn(len(hdrClose))])
 		case 0, 1, 2:
 			b.WriteString(names[r.Intn(len(names))])
 			b.WriteString(seps[r.Intn(len(seps))])

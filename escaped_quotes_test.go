@@ -68,7 +68,8 @@ func TestEscapedQuotesInPlainTextAreRedacted(t *testing.T) {
 	}
 }
 
-// A quoted value is 4 to 300 characters, plain or escaped; the backslashes of an escaped quote are not part of it.
+// A quoted value is at least 4 characters and has no upper limit (the 300 of v0.1.0 to v0.1.2 let a long credential
+// through); plain or escaped, the backslashes of an escaped quote are not part of it.
 func TestQuotedValueLengthLimits(t *testing.T) {
 	r := redact.Default()
 	for _, q := range []struct{ name, open, close string }{
@@ -78,7 +79,7 @@ func TestQuotedValueLengthLimits(t *testing.T) {
 		for _, c := range []struct {
 			n    int
 			want bool
-		}{{3, false}, {4, true}, {5, true}, {300, true}, {301, false}} {
+		}{{3, false}, {4, true}, {5, true}, {300, true}, {301, true}, {5000, true}} {
 			in := "K_TOKEN=" + q.open + strings.Repeat("v", c.n) + q.close + " rest"
 			out, hits := r.String(in)
 			if redacted := hits.Total() == 1 && strings.Contains(out, "[REDACTED:env-secret]"); redacted != c.want {
@@ -135,8 +136,7 @@ func TestCanariesInDocumentsStoredAsText(t *testing.T) {
 			if hits.Total() == 0 {
 				t.Errorf("%s: nothing was redacted", label)
 			}
-			// an unquoted value (NAME=value) takes the backslash of an escaped closing quote with it, as it always did
-			if !json.Valid([]byte(out)) && !strings.HasPrefix(f.Text, "DB_PASSWORD=") && sh.name != "array" {
+			if !json.Valid([]byte(out)) {
 				t.Errorf("%s: the document is no longer valid JSON\n out %s", label, out)
 			}
 		}
@@ -159,17 +159,43 @@ func TestARunOfBackslashesIsNotAValue(t *testing.T) {
 	}
 }
 
-// The escaped forms are found in plain text, so String does not need to parse a document to redact it: these
-// are the whole of what a parse of text that is a document would add, and the rest is key-name only.
+// The escaped forms are found in plain text, so String does not need to parse a document to redact it: what a parse would
+// add is the key-name rule, a value of 1 to 3 characters under a secret key.
 func TestStringOnADocumentMissesOnlyWhatNeedsTheKeyNameRule(t *testing.T) {
 	r := redact.Default()
 	doc := `{"cookie":"sessionid=abcdef123456","password":"abc","user":"ann"}`
 	out, hits := r.String(doc)
-	if out != doc || hits.Total() != 0 {
-		t.Fatalf("String is documented as text rules only: %s %v", out, hits)
+	if want := `{"cookie":"[REDACTED:cookie-header]","password":"abc","user":"ann"}`; out != want || hits.Total() != 1 {
+		t.Fatalf("String is text rules only: %s %v", out, hits)
 	}
 	red, h, err := r.JSON([]byte(doc))
 	if err != nil || strings.Contains(string(red), "abcdef123456") || strings.Contains(string(red), `"abc"`) || h[redact.KeyNameRuleName] != 2 {
 		t.Fatalf("JSON does: %s %v %v", red, h, err)
+	}
+}
+
+// The value of an unquoted assignment or flag stops before the backslashes that belong to an escaped closing quote
+// (but a backslash that is the value's own, with no quote after it, stays inside).
+func TestUnquotedValuesKeepTheBackslashOfAnEscapedClosingQuote(t *testing.T) {
+	r := redact.Default()
+	for _, c := range []struct{ name, in, want string }{
+		{"bare, escaped double quote", `echo \"API_KEY=abcdefghijk\"`, `echo \"API_KEY=[REDACTED:env-secret]\"`},
+		{"bare, escaped single quote", `echo \'API_KEY=abcdefghijk\'`, `echo \'API_KEY=[REDACTED:env-secret]\'`},
+		{"bare, two levels", `echo \\\"API_KEY=abcdefghijk\\\"`, `echo \\\"API_KEY=[REDACTED:env-secret]\\\"`},
+		{"bare, in a document kept as text", `{\"cmd\":\"export DB_PASSWORD=hunter2hunter2\"}`, `{\"cmd\":\"export DB_PASSWORD=[REDACTED:env-secret]\"}`},
+		{"bare, plain quote after it", `echo "API_KEY=abcdefghijk"`, `echo "API_KEY=[REDACTED:env-secret]"`},
+		{"bare, six characters and a backslash", `T_TOKEN=abcde\" x`, `T_TOKEN=[REDACTED:env-secret]\" x`},
+		{"bare, the value's own backslash", `PASSWORD=abcdefg\ more`, `PASSWORD=[REDACTED:env-secret] more`},
+		{"bare, a backslash and then a quote that is plain", `PASSWORD=abcdefg\\" more`, `PASSWORD=[REDACTED:env-secret]\\" more`},
+		{"flag, escaped quotes", `mysql --password \"hunter2flag99\" -h db`, `mysql --password \"[REDACTED:flag-secret]\" -h db`},
+		{"flag, escaped quote after a bare value", `mysql --password hunter2flag99\" -h db`, `mysql --password [REDACTED:flag-secret]\" -h db`},
+	} {
+		out, hits := r.String(c.in)
+		if out != c.want || hits.Total() != 1 {
+			t.Errorf("%s:\n in   %s\n out  %s %v\n want %s", c.name, c.in, out, hits, c.want)
+		}
+		if again, h := r.String(out); again != out || h.Total() != 0 {
+			t.Errorf("%s: not idempotent\n once  %s\n twice %s %v", c.name, out, again, h)
+		}
 	}
 }

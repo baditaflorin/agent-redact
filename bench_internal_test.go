@@ -31,6 +31,7 @@ var benchTriggers = []struct {
 	{"token", 220, true}, {"secret", 117, true}, {"password", 22, true}, {"credential", 25, true},
 	{"apikey", 44, true}, {"api_key", 31, true}, {"api-key", 12, false}, {"authorization", 16, true},
 	{"bearer", 17, false}, {"task-force", 62, false}, {"https://example.com/docs/page", 497, false},
+	{"cookie", 7, false}, {"Cookie: sid=abc123; theme=dark", 1, false},
 }
 
 func benchString(r *rand.Rand, size int) string {

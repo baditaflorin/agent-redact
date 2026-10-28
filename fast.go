@@ -165,6 +165,7 @@ func (r Rule) applyFast(s string, sc *scratch) (out string, n int, handled bool)
 		if g+1 < len(loc) && loc[g] >= 0 && leaveAlone(s[loc[g]:loc[g+1]]) {
 			return true
 		}
+		r.trimEscapes(s, loc)
 		b.WriteString(s[last:loc[0]])
 		b.Write(f.anch.ExpandString(nil, r.Template, s, loc))
 		last = loc[1]
@@ -192,6 +193,25 @@ func startAtWordRun(s string, hit int, try func(int) bool) {
 		i--
 	}
 	try(i)
+}
+
+// startAtQuotedHeader: a header held in quotes begins at the quote, with the backslashes in front of it, that directly
+// precedes the name (the name starts the word run that holds the hit).
+func startAtQuotedHeader(quote byte) func(string, int, func(int) bool) {
+	return func(s string, hit int, try func(int) bool) {
+		i := hit
+		for i > 0 && isWordByte(s[i-1]) {
+			i--
+		}
+		if i == 0 || s[i-1] != quote {
+			return
+		}
+		j := i - 1
+		for j > 0 && s[j-1] == '\\' {
+			j--
+		}
+		try(j)
+	}
 }
 
 // startAtFlag: "--name value" begins at the white space before the dashes.

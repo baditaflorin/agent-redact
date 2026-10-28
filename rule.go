@@ -34,6 +34,11 @@ type Rule struct {
 	// whose secret is nothing but backslashes (see leaveAlone).
 	Guard int
 
+	// trimEscape, set on built-in rules whose value ends where a quote begins, moves the end of the value back over
+	// backslashes when a quote follows them: they escape that quote (as in NAME=abc\" inside a JSON string), they are
+	// not part of the value. Without it a document kept as text stops being valid JSON when such a value is redacted.
+	trimEscape bool
+
 	// fast, set on built-in rules only, finds the same matches quicker (see fast.go). Re stays the
 	// definition of the rule and is what the differential test compares the fast path with.
 	fast *fastPath
@@ -52,6 +57,32 @@ func leaveAlone(secret string) bool {
 		}
 	}
 	return len(secret) > 0
+}
+
+// trimEscapes applies trimEscape to a match. The value is the last group of the match, so its end is the match's end.
+func (r Rule) trimEscapes(s string, loc []int) {
+	if !r.trimEscape {
+		return
+	}
+	g := r.Guard * 2
+	if g+1 >= len(loc) || loc[g] < 0 {
+		return
+	}
+	end := loc[g+1]
+	if end >= len(s) || (s[end] != '"' && s[end] != '\'') {
+		return
+	}
+	k := end
+	for k > loc[g] && s[k-1] == '\\' {
+		k--
+	}
+	if k == end || k == loc[g] {
+		return
+	}
+	loc[g+1] = k
+	if loc[1] == end {
+		loc[1] = k
+	}
 }
 
 func (r Rule) mayMatch(s string) bool {
@@ -92,6 +123,7 @@ func (r Rule) applyRegex(s string) (string, int) {
 		if g+1 < len(loc) && loc[g] >= 0 && leaveAlone(s[loc[g]:loc[g+1]]) {
 			continue
 		}
+		r.trimEscapes(s, loc)
 		b.WriteString(s[last:loc[0]])
 		b.Write(r.Re.ExpandString(nil, r.Template, s, loc))
 		last = loc[1]

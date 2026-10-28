@@ -29,14 +29,31 @@ var envNeedles = []string{"token", "secret", "passw", "credential", "apikey", "a
 var flagNeedles = []string{"token", "secret", "passw", "apikey", "api-key", "accesskey", "access-key", "authkey", "auth-key"}
 
 // What follows the name in the three env-secret rules: the separator (group 2), the opening quote (3, empty for a
-// bare value), the value (4) and the closing quote (5). A quoted value is 4 to 300 characters and does not end in a
-// backslash: the backslashes in front of the closing quote belong to the quote, they stay in the text and they cannot
-// be counted as part of a value that would otherwise be too short.
+// bare value), the value (4) and the closing quote (5). A quoted value is at least 4 characters, as long as the line
+// allows, and does not end in a backslash: the backslashes in front of the closing quote belong to the quote, they stay
+// in the text and they cannot be counted as part of a value that would otherwise be too short. (Up to v0.1.2 a quoted
+// value was capped at 300 characters, and a longer one went through.)
 const (
-	envDouble = `(` + optQuote + `\s*[=:]\s*)(` + dquote + `)([^"\n]{3,299}[^"\n\\])(` + dquote + `)`
-	envSingle = `(` + optQuote + `\s*[=:]\s*)(` + squote + `)([^'\n]{3,299}[^'\n\\])(` + squote + `)`
+	envDouble = `(` + optQuote + `\s*[=:]\s*)(` + dquote + `)([^"\n]{3,}[^"\n\\])(` + dquote + `)`
+	envSingle = `(` + optQuote + `\s*[=:]\s*)(` + squote + `)([^'\n]{3,}[^'\n\\])(` + squote + `)`
 	envBare   = `(` + optQuote + `\s*[=:]\s*)()([^\s"'\x60,;)}\]]{6,})`
 )
+
+// The cookie-header rule: the whole value of a Cookie or Set-Cookie header. Four forms, in this order: a pair
+// ("Cookie": "a=b", cookie = 'a=b') with the same shape as an env-secret pair; a header held in single quotes
+// (-H 'Cookie: a=b'), which ends at the closing quote; and a header line, which ends at the end of the line or at a
+// double quote, and holds name=value (a cookie is that; "Cookie: none" and "Cookie: a=" are not one). A header held in double quotes
+// is a header line that ends at the quote. Cookie values are not capped: real ones run to a thousand characters.
+const (
+	cookieName         = `([A-Z0-9_]*COOKIE)`
+	cookieSingleHeader = `(` + squote + `[A-Z0-9_]*COOKIE[ \t]*:[ \t]*)([^'\n \t][^'\n]+[^'\n\\])(` + squote + `)`
+	cookieLine         = `([A-Z0-9_]*COOKIE[ \t]*:[ \t]*)([^\r\n"= \t][^\r\n"=]*=(?:"[^"\r\n]*"|[^\r\n"])(?:="[^"\r\n]*"|[^\r\n"])*)`
+)
+
+func cookieFast(start func(string, int, func(int) bool), anchored string) *fastPath {
+	return &fastPath{needles: []string{"cookie"}, fold: true, caseInsensitive: true, group: 2, start: start,
+		anch: rx(`(?i)\A` + anchored)}
+}
 
 // envFast is the fast path of one of the three env-secret rules: sep is the pattern after the name.
 func envFast(sep string) *fastPath {
@@ -84,6 +101,18 @@ func DefaultRules() []Rule {
 			Template: "${1}${2}:[REDACTED:url-credentials]@", Guard: 3, Hints: []string{"://"},
 			fast: &fastPath{needles: []string{"://"}, caseInsensitive: true, boundary: true, start: startAtScheme,
 				anch: rx(`(?i)\A([a-z][a-z0-9+.-]{1,15}://)([^/\s:@"']+):([^/\s@"']+)@`)}},
+		{Name: "cookie-header", Re: rx(`(?i)\b` + cookieName + envDouble),
+			Template: `${1}${2}${3}[REDACTED:cookie-header]${5}`, Guard: 4,
+			fast: cookieFast(startAtWordRun, cookieName+envDouble)},
+		{Name: "cookie-header", Re: rx(`(?i)\b` + cookieName + envSingle),
+			Template: `${1}${2}${3}[REDACTED:cookie-header]${5}`, Guard: 4,
+			fast: cookieFast(startAtWordRun, cookieName+envSingle)},
+		{Name: "cookie-header", Re: rx(`(?i)` + cookieSingleHeader),
+			Template: `${1}[REDACTED:cookie-header]${3}`, Guard: 2,
+			fast: cookieFast(startAtQuotedHeader('\''), cookieSingleHeader)},
+		{Name: "cookie-header", Re: rx(`(?i)\b` + cookieLine),
+			Template: `${1}[REDACTED:cookie-header]`, Guard: 2, trimEscape: true,
+			fast: cookieFast(startAtWordRun, cookieLine)},
 		// A quoted value may hold spaces, so the quoted forms run before the bare one.
 		{Name: "env-secret", Re: rx(`(?i)` + secretName + envDouble),
 			Template: `${1}${2}${3}[REDACTED:env-secret]${5}`, Guard: 4,
@@ -92,11 +121,11 @@ func DefaultRules() []Rule {
 			Template: `${1}${2}${3}[REDACTED:env-secret]${5}`, Guard: 4,
 			fast: envFast(envSingle)},
 		{Name: "env-secret", Re: rx(`(?i)` + secretName + envBare),
-			Template: `${1}${2}${3}[REDACTED:env-secret]`, Guard: 4,
+			Template: `${1}${2}${3}[REDACTED:env-secret]`, Guard: 4, trimEscape: true,
 			fast: envFast(envBare)},
 		// "--password hunter2": the flag form with a space, which the rules above do not see.
 		{Name: "flag-secret", Re: rx(`(?i)` + flagBody),
-			Template: `${1}${2}[REDACTED:flag-secret]`, Guard: 3,
+			Template: `${1}${2}[REDACTED:flag-secret]`, Guard: 3, trimEscape: true,
 			fast: &fastPath{needles: flagNeedles, fold: true, caseInsensitive: true, start: startAtFlag,
 				anch: rx(`(?i)\A` + flagBody)}},
 	}

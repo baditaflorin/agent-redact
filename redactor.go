@@ -53,8 +53,11 @@ const KeyNameRuleName = "key-name"
 
 // keyName matches an object key that holds a secret, after the key is lower-cased and stripped of
 // '_', '-', '.' and spaces. It must END with the sensitive word, so "access_token" and "apiKey"
-// match but "input_tokens" and "tokenizer" do not.
-var keyName = regexp.MustCompile(`(password|passwd|secret|token|apikey|accesskey|privatekey|authkey|authorization|credential|credentials|cookie|setcookie)$`)
+// match but "input_tokens" and "tokenizer" do not. The words are the ones the text rules know (so SECRET_KEY is here as
+// well as api_key) plus the JSON-only ones; each was checked against the key names of real session records, and a word
+// that real records use for something harmless is not here: "sessionid", "session_key" (an identifier), "pwd" (the
+// working directory) and "pass".
+var keyName = regexp.MustCompile(`(password|passwd|passphrase|secret|secretkey|token|apikey|accesskey|privatekey|authkey|signingkey|encryptionkey|masterkey|authorization|credential|credentials|cookie|setcookie)$`)
 
 // Redactor applies a fixed rule set. It is safe for concurrent use.
 type Redactor struct {

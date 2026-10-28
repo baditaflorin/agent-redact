@@ -151,12 +151,12 @@ func TestJSONDeepNestingIsBoundedAndStillRedactsQuotedSecrets(t *testing.T) {
 }
 
 // The bound is observable with a secret only the key-name rule knows: at the depth JSON follows it is replaced, one
-// level further down the document is plain text to the text rules, and the "cookie" key means nothing to them.
+// level further down the document is plain text to the text rules, and the "signing_key" key means nothing to them.
 // This test states the limit the README names: change it with maxNesting.
 func TestJSONFollowsDocumentsInStringsToExactlyFourLevels(t *testing.T) {
 	r := redact.Default()
 	for n := 1; n <= 6; n++ {
-		doc := `{"cookie":"sessionid=abcdef123456","user":"ann"}`
+		doc := `{"signing_key":"abcdef123456","user":"ann"}`
 		for i := 1; i < n; i++ {
 			doc = `{"arguments":` + jstr(doc) + `}`
 		}
@@ -176,7 +176,7 @@ func TestJSONFollowsDocumentsInStringsToExactlyFourLevels(t *testing.T) {
 func TestJSONNestedDocumentMayHaveWhiteSpaceAround(t *testing.T) {
 	r := redact.Default()
 	for _, ws := range []string{" ", "\t", "\n", "\r", " \r\n\t "} {
-		for _, inner := range []string{`{"cookie":"sessionid=abcdef123456"}`, `["x",{"cookie":"sessionid=abcdef123456"}]`} {
+		for _, inner := range []string{`{"signing_key":"abcdef123456"}`, `["x",{"signing_key":"abcdef123456"}]`} {
 			out, hits, err := r.JSON([]byte(`{"arguments":` + jstr(ws+inner+ws) + `}`))
 			if err != nil || strings.Contains(string(out), "abcdef123456") || hits[redact.KeyNameRuleName] != 1 {
 				t.Errorf("%q around %s: %s %v %v", ws, inner, out, hits, err)
@@ -205,16 +205,17 @@ func TestJSONNestedCutOffPrivateKeyKeepsTheDocumentValid(t *testing.T) {
 	}
 }
 
-// The text rules still run over a document read as JSON, for what only the whole text shows: a "SECRET_KEY" pair that
-// the key-name rule does not list, with or without another secret in the same document.
+// The text rules still run over a document read as JSON, for what only the whole text shows: a secret that is a number
+// (the key-name rule is for strings), with or without another secret in the same document.
 func TestJSONTextRulesStillRunOverANestedDocument(t *testing.T) {
 	r := redact.Default()
 	for _, inner := range []string{
-		`{"SECRET_KEY":"abcdef123456"}`,
-		`{"cmd":"export DB_PASSWORD=hunter2hunter2","SECRET_KEY":"abcdef123456"}`,
+		`{"password":123456789012}`,
+		`{"cmd":"export DB_PASSWORD=hunter2hunter2","api_key":987654321098}`,
 	} {
 		out, hits, err := r.JSON([]byte(`{"arguments":` + jstr(inner) + `}`))
-		if err != nil || strings.Contains(string(out), "abcdef123456") || strings.Contains(string(out), "hunter2hunter2") || hits.Total() == 0 {
+		if err != nil || strings.Contains(string(out), "123456789012") || strings.Contains(string(out), "987654321098") ||
+			strings.Contains(string(out), "hunter2hunter2") || hits.Total() == 0 {
 			t.Errorf("%s -> %s %v %v", inner, out, hits, err)
 		}
 	}

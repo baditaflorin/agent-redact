@@ -22,7 +22,8 @@ type Fake struct {
 
 func rep(s string, n int) string { return strings.Repeat(s, n)[:n] }
 
-// Fakes returns one canary for every default rule and for the JSON key-name rule.
+// Fakes returns canaries for every default rule and for the JSON key-name rule: at least one each, more where a rule
+// has several forms (a quoted value, a header line, a key that only the key-name rule knows).
 func Fakes() []Fake {
 	anthropic := "sk-" + "ant-api03-" + rep("Ab3_x9", 28)
 	openai := "sk-" + "proj-" + rep("Qw7Er5", 40)
@@ -42,6 +43,9 @@ func Fakes() []Fake {
 	quoted := "my long " + "secret phrase"
 	flagPass := "hunter2" + "flag99"
 	keyNameValue := "abcdefghij" + "klmnop"
+	secretKeyValue := "dj4ng0" + "Sup3rS3cr3t" + "KeyValue"
+	cookieValue := "s3ss10n" + rep("Zx9Qw", 8)
+	setCookieValue := "c00k1e" + rep("Mn4Bv", 8)
 	return []Fake{
 		{Rule: "private-key", Secret: pkBody, Text: "key file:\n" + privateKey + "\nend of file"},
 		{Rule: "anthropic-key", Secret: anthropic, Text: "export ANTHROPIC=" + anthropic + " # old"},
@@ -61,5 +65,8 @@ func Fakes() []Fake {
 		{Rule: "env-secret", Secret: envPass, Text: "{\"api_key\": \"" + envPass + "\"} printed to the log"},
 		{Rule: "flag-secret", Secret: flagPass, Text: "mysql --password " + flagPass + " -h db"},
 		{Rule: "key-name", Secret: keyNameValue, JSON: true, Text: "{\"user\":\"ann\",\"access_token\":\"" + keyNameValue + "\"}"},
+		{Rule: "key-name", Secret: secretKeyValue, JSON: true, Text: "{\"app\":\"demo\",\"SECRET_KEY\":\"" + secretKeyValue + "\"}"},
+		{Rule: "cookie-header", Secret: cookieValue, Text: "curl -H 'Cookie: session=" + cookieValue + "; theme=dark' https://example.invalid"},
+		{Rule: "cookie-header", Secret: setCookieValue, Text: "HTTP/1.1 200 OK\nSet-Cookie: sid=" + setCookieValue + "; Path=/; HttpOnly\nContent-Type: text/html"},
 	}
 }
