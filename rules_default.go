@@ -67,6 +67,18 @@ const authHeader = `(authorization` + optQuote + `\s*[:=]\s*` + optQuote + `(?:b
 // flagBody is the flag-secret pattern, with the optional quote of the value in group 2.
 const flagBody = `(\s--?(?:[a-z0-9]+-)*(?:token|password|passwd|secret|api-?key|access-?key|auth-?key)\s+)(` + optQuote + `)([^\s"']{6,})`
 
+// The fleet's own credential formats (go_apikey_service main_issue.go and lease.go, go-common apikey/resolve.go):
+// a keystore key is ak_ + 32 lower-case hex (ak_selftest_ + 32 hex for the keystore's self-test), a lease-issuer
+// delegation token is li_ + 24 hex + _ + 64 hex, and an nginx fallback key is fb_ + 32 hex (64 per the go-common
+// contract). The exact length and character set are required, and the key must not touch a letter or digit on
+// either side, so identifiers such as leak_detector, fb_page_id or a longer mixed token pass through. A JSON escape
+// (\n, \t, \r) or a URL escape (%3D) in front counts as a separator. Go has no look-behind, so what is in front
+// (group 1) and an underscore behind (group 3) are captured and put back.
+const (
+	fleetBefore = `(^|[^A-Za-z0-9]|\\[nrt]|%[0-9A-Fa-f]{2})`
+	fleetAfter  = `(\b|_)`
+)
+
 // DefaultRules returns the built-in rules, most specific first. The order matters: a provider key
 // is claimed by its own rule before a generic one can see it.
 func DefaultRules() []Rule {
@@ -93,6 +105,12 @@ func DefaultRules() []Rule {
 			Template: "[REDACTED:stripe-key]", Hints: []string{"k_live_", "k_test_"}},
 		{Name: "jwt", Re: rx(`\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`),
 			Template: "[REDACTED:jwt]", Hints: []string{"eyJ"}},
+		{Name: "fleet-lease-issuer", Re: rx(fleetBefore + `(li_[0-9a-f]{24}_[0-9a-f]{64})` + fleetAfter),
+			Template: "${1}[REDACTED:fleet-lease-issuer]${3}", Guard: 2, Hints: []string{"li_"}},
+		{Name: "fleet-api-key", Re: rx(fleetBefore + `(ak_(?:selftest_)?[0-9a-f]{32,64})` + fleetAfter),
+			Template: "${1}[REDACTED:fleet-api-key]${3}", Guard: 2, Hints: []string{"ak_"}},
+		{Name: "fleet-fallback-key", Re: rx(fleetBefore + `(fb_[0-9a-f]{32,64})` + fleetAfter),
+			Template: "${1}[REDACTED:fleet-fallback-key]${3}", Guard: 2, Hints: []string{"fb_"}},
 		{Name: "auth-header", Re: rx(`(?i)\b` + authHeader),
 			Template: "${1}[REDACTED:auth-header]", Guard: 2,
 			fast: &fastPath{needles: []string{"authorization"}, fold: true, caseInsensitive: true, boundary: true, start: startAtHit,

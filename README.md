@@ -66,6 +66,7 @@ Every match becomes `[REDACTED:<rule>]`.
 | `anthropic-key`, `openai-key`, `xai-key`, `google-api-key` | provider API keys |
 | `github-token`, `aws-access-key`, `slack-token`, `stripe-key` | tokens of those services |
 | `jwt` | three-part JSON web tokens |
+| `fleet-api-key`, `fleet-lease-issuer`, `fleet-fallback-key` | the fleet's own credentials, bare or in any context: keystore keys `ak_` + 32 hex (and `ak_selftest_`), lease-issuer delegation tokens `li_` + 24 hex + `_` + 64 hex, nginx fallback keys `fb_` + 32 or 64 hex; exact length and lower-case hex, not touching a letter or digit, so `leak_detector` or `fb_page_id` pass |
 | `auth-header` | the value of `Authorization: Bearer|Basic|Token ...` |
 | `url-credentials` | the password in `scheme://user:password@host` |
 | `cookie-header` | the whole value of a `Cookie:` or `Set-Cookie:` header (to the end of its line, or the quote that closes it), and the quoted value of a pair such as `"Cookie": "a=b"` |

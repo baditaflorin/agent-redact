@@ -46,6 +46,9 @@ func Fakes() []Fake {
 	secretKeyValue := "dj4ng0" + "Sup3rS3cr3t" + "KeyValue"
 	cookieValue := "s3ss10n" + rep("Zx9Qw", 8)
 	setCookieValue := "c00k1e" + rep("Mn4Bv", 8)
+	fleetKey := "a" + "k_" + rep("0123456789abcdef", 32)
+	fleetLease := "l" + "i_" + rep("a1b2c3d4e5f6", 24) + "_" + rep("fedcba9876543210", 64)
+	fleetFallback := "f" + "b_" + rep("9876543210fedcba", 32)
 	return []Fake{
 		{Rule: "private-key", Secret: pkBody, Text: "key file:\n" + privateKey + "\nend of file"},
 		{Rule: "anthropic-key", Secret: anthropic, Text: "export ANTHROPIC=" + anthropic + " # old"},
@@ -67,6 +70,10 @@ func Fakes() []Fake {
 		{Rule: "key-name", Secret: keyNameValue, JSON: true, Text: "{\"user\":\"ann\",\"access_token\":\"" + keyNameValue + "\"}"},
 		{Rule: "key-name", Secret: secretKeyValue, JSON: true, Text: "{\"app\":\"demo\",\"SECRET_KEY\":\"" + secretKeyValue + "\"}"},
 		{Rule: "cookie-header", Secret: cookieValue, Text: "curl -H 'Cookie: session=" + cookieValue + "; theme=dark' https://example.invalid"},
+		{Rule: "fleet-api-key", Secret: fleetKey, Text: "curl -H \"X-API-Key: " + fleetKey + "\" https://example.invalid"},
+		{Rule: "fleet-api-key", Secret: fleetKey, Text: "key " + fleetKey + " issued"},
+		{Rule: "fleet-lease-issuer", Secret: fleetLease, Text: "issuer token " + fleetLease},
+		{Rule: "fleet-fallback-key", Secret: fleetFallback, Text: "if ($http_x_api_key = \"" + fleetFallback + "\") { return 200; }"},
 		{Rule: "cookie-header", Secret: setCookieValue, Text: "HTTP/1.1 200 OK\nSet-Cookie: sid=" + setCookieValue + "; Path=/; HttpOnly\nContent-Type: text/html"},
 	}
 }
